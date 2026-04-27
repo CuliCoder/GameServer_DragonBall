@@ -1,0 +1,34 @@
+@DragonBall_Server_HostAddress = http://localhost:5012
+
+GET {{DragonBall_Server_HostAddress}}/user
+Accept: application/json
+###
+POST {{DragonBall_Server_HostAddress}}/user
+Content-Type: application/json
+
+{
+    "username": "test1",
+    "email": "test1@dragonsige.com",
+    "passwordHash": "123456",
+    "class": "warrior",
+    "role": "admin",
+    "isBanned": false,
+    "createdAt": null
+}
+###
+GET {{DragonBall_Server_HostAddress}}/user/1
+Accept: application/json
+###
+PUT {{DragonBall_Server_HostAddress}}/user/2
+Content-Type: application/json
+
+{
+    "id": 2,
+    "username": "test1_updated",
+    "email": "test1_updated@dragonsige.com",
+    "passwordHash": "654321",
+    "class": "warrior",
+    "role": "admin",
+    "isBanned": false,
+    "createdAt": null
+}
