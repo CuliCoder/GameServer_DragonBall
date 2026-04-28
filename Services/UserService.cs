@@ -1,6 +1,3 @@
-namespace DragonBall_Server.Services;
-
-using DragonBall_Server.Configs;
 using DragonSiege.Models;
 using MySqlConnector;
 public class UserService

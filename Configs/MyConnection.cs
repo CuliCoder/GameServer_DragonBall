@@ -1,4 +1,3 @@
-namespace DragonBall_Server.Configs;
 using MySqlConnector;
 public class MyConnection
 {

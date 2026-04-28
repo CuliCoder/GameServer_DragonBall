@@ -1,4 +1,3 @@
-namespace DragonBall_Server.Configs;
 public class HashPass
 {
     public string HashPassword(string password)

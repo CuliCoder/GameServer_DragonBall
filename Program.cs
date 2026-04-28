@@ -1,6 +1,3 @@
-using DragonBall_Server.Services;
-using DragonBall_Server.Configs;
-
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.

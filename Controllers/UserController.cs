@@ -1,7 +1,6 @@
-using DragonBall_Server.Services;
 using DragonSiege.Models;
 using Microsoft.AspNetCore.Mvc;
-namespace DragonBall_Server.Controllers;
+namespace Controllers;
 [ApiController]
 [Route("[controller]")]
 public class UserController : ControllerBase
