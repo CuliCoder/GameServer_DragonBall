@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using Shared;
-
+using System.Numerics;
 // ============================================================
 //  GAME ROOM
 //  Mỗi room là một "thế giới" độc lập:
@@ -18,10 +18,10 @@ using Shared;
 // ============================================================
 public class GameRoom
 {
-    public string RoomId    { get; }
-    public int    MaxPlayer { get; }
+    public string RoomId { get; }
+    public int MaxPlayer { get; }
 
-    private readonly ILogger         _logger;
+    private readonly ILogger _logger;
     private readonly PacketDispatcher _dispatcher;
 
     // Sessions trong room: sessionId → ClientSession
@@ -42,9 +42,9 @@ public class GameRoom
 
     public GameRoom(string roomId, int maxPlayer, ILogger logger)
     {
-        RoomId    = roomId;
+        RoomId = roomId;
         MaxPlayer = maxPlayer;
-        _logger   = logger;
+        _logger = logger;
 
         // Khởi tạo dispatcher — đăng ký handler cho từng PacketType
         _dispatcher = new PacketDispatcher();
@@ -79,25 +79,41 @@ public class GameRoom
         _sessions[session.SessionId] = session;
         session.CurrentRoom = this;
 
-        _playerStates[session.SessionId] = new PlayerState{ PlayerId = session.SessionId, X = 0, Y = 0, VelX = 0, VelY = 0, AnimState = "idle" };
-
         _logger.LogInformation($"[Room {RoomId}] {session.PlayerName} vào phòng. ({_sessions.Count}/{MaxPlayer})");
 
-        // Thông báo cho client biết join thành công
-        await session.SendAsync(new S_JoinRoomAckPacket
+        await BroadcastAsync(new S_JoinRoomAckPacket
         {
-            RoomId   = RoomId,
-            PlayerId = session.SessionId
-        });
-
-        // Thông báo cho các player khác
-        await BroadcastExceptAsync(session.SessionId, new S_PlayerJoinedPacket
-        {
-            PlayerId   = session.SessionId,
-            PlayerName = session.PlayerName
+            RoomId = RoomId,
+            CurrentPlayers = _sessions.Values.Select(s => new PlayerInfo { PlayerId = s.SessionId, PlayerName = s.PlayerName }).ToList()
         });
     }
+    public async Task AddPlayerInWorldAsync(ClientSession session, CancellationToken token)
+    {
+        if (!_sessions.TryGetValue(session.SessionId, out var sess) || _playerStates.ContainsKey(session.SessionId))
+        {
+            return;
+        }
 
+        _playerStates[session.SessionId] = new PlayerState
+        {
+            PlayerId = session.SessionId,
+            PlayerName = session.PlayerName,
+            X = -10f + (_playerStates.Count - 1) * 3f,
+            Y = 20f,
+            VelX = 0f,
+            VelY = 0f,
+            AnimState = "idle"
+        };
+        _logger.LogInformation($"[Room {RoomId}] {session.PlayerName} vào world. ({_playerStates.Count} players in world)");
+        await session.SendAsync(new S_JoinWorldPacket
+        {
+            CurrentPlayers = _playerStates.Values.ToList()
+        });
+        await BroadcastExceptInWorldAsync(session.SessionId, new S_JoinWorldPacket
+        {
+            CurrentPlayers = new List<PlayerState> { _playerStates[session.SessionId] }
+        }, token);
+    }
     // ============================================================
     //  REMOVE SESSION — khi player rời hoặc mất kết nối
     // ============================================================
@@ -125,12 +141,12 @@ public class GameRoom
     // ============================================================
     public async Task RunFixedUpdateLoopAsync(CancellationToken token)
     {
-        const int   TICK_RATE           = 60;                         // 50 Hz
-        const float FIXED_DELTA         = 1f / TICK_RATE;             // 0.02s
-        const int   BROADCAST_EVERY_N_TICKS = 1;                      // broadcast mỗi tick (có thể tăng lên 2-3 nếu muốn tiết kiệm bandwidth)
+        const int TICK_RATE = 60;                         // 50 Hz
+        const float FIXED_DELTA = 1f / TICK_RATE;             // 0.02s
+        const int BROADCAST_EVERY_N_TICKS = 1;                      // broadcast mỗi tick (có thể tăng lên 2-3 nếu muốn tiết kiệm bandwidth)
 
         var tickInterval = TimeSpan.FromSeconds(FIXED_DELTA);
-        var stopwatch    = Stopwatch.StartNew();
+        var stopwatch = Stopwatch.StartNew();
         var nextTickTime = stopwatch.Elapsed;
 
         _logger.LogInformation($"[Room {RoomId}] Fixed update loop bắt đầu ({TICK_RATE}Hz)");
@@ -164,10 +180,10 @@ public class GameRoom
             // Cập nhật vị trí dựa trên velocity (đơn giản hóa)
             // Thực tế: dùng physics engine hoặc tính toán phức tạp hơn
             // -------------------------------------------------------
-            foreach (var state in _playerStates.Values)
-            {
-                SimulatePlayer(state, FIXED_DELTA);
-            }
+            // foreach (var state in _playerStates.Values)
+            // {
+            //     SimulatePlayer(state, FIXED_DELTA);
+            // }
 
             // -------------------------------------------------------
             // PHASE 3: GAME LOGIC
@@ -204,20 +220,20 @@ public class GameRoom
     // ============================================================
     //  PHYSICS — cập nhật vị trí player
     // ============================================================
-    private static void SimulatePlayer(PlayerState state, float delta)
-    {
-        const float SPEED = 5f;
+    // private static void SimulatePlayer(PlayerState state, float delta)
+    // {
+    //     const float SPEED = 5f;
 
-        state.X += state.X * SPEED * delta;
-        state.Y += state.Y * SPEED * delta;
+    //     state.X += state.VelX * SPEED * delta;
+    //     state.Y += state.VelY * SPEED * delta;
 
-        // Clamp trong map bounds (ví dụ)
-        state.X = Math.Clamp(state.X, -100f, 100f);
-        state.Y = Math.Clamp(state.Y, -100f, 100f);
+    //     // Clamp trong map bounds (ví dụ)
+    //     state.X = Math.Clamp(state.X, -100f, 100f);
+    //     state.Y = Math.Clamp(state.Y, -100f, 100f);
 
-        // Cập nhật animation state
-        state.AnimState = (state.X != 0 || state.Y != 0) ? "run" : "idle";
-    }
+    //     // Cập nhật animation state
+    //     state.AnimState = (Math.Abs(state.VelX) > 0.01f || Math.Abs(state.VelY) > 0.01f) ? "run" : "idle";
+    // }
 
     // ============================================================
     //  PACKET HANDLERS — mỗi handler xử lý 1 loại packet
@@ -225,15 +241,41 @@ public class GameRoom
     // ============================================================
     private void HandleInput(int sessionId, C_InputPacket packet)
     {
-        if (!_playerStates.TryGetValue(sessionId, out var state)) return;
+            _logger.LogInformation($"[Room {RoomId}] HandleInput gọi cho Player {sessionId}");
 
-        // Chỉ cập nhật velocity — SimulatePlayer() sẽ dùng ở Phase 2
-        state.VelX = Math.Clamp(packet.DirX, -1f, 1f);
-        state.VelY = Math.Clamp(packet.DirY, -1f, 1f);
+            if (!_playerStates.TryGetValue(sessionId, out PlayerState? state))
+            {
+                _logger.LogWarning($"[Room {RoomId}] Player {sessionId} không tìm thấy trong _playerStates");
+                return;
+            }
 
-        // TODO: xử lý Jump, Attack...
+            _logger.LogInformation($"[Room {RoomId}] Player {sessionId} di chuyển từ {new Vector2(packet.CurrentPositionX, packet.CurrentPositionY)} tới {new Vector2(packet.TargetPositionX, packet.TargetPositionY)}");
+        // Cấu hình giới hạn
+        float maxSpeed = 10f;
+        float networkTolerance = 10.0f; // Sai số cho phép do lag mạng (Ping)
+
+        // Tính khoảng cách từ điểm cũ đến điểm Client muốn tới
+        float distanceMoved = Vector2.Distance(state.Position, new Vector2(packet.TargetPositionX, packet.TargetPositionY));
+
+        // Tính quãng đường TỐI ĐA nhân vật có thể đi được trong khoảng thời gian deltaTime
+        float maxAllowedDistance = (Math.Abs(packet.DirX) * maxSpeed * packet.DeltaTime) + networkTolerance;
+
+        if (distanceMoved <= maxAllowedDistance)
+        {
+            // HỢP LỆ: Cập nhật vị trí mới
+            state.Position = new Vector2(packet.TargetPositionX, packet.TargetPositionY);
+        }
+        else
+        {
+            // PHÁT HIỆN HACK SPEED HOẶC LỖI MẠNG NẶNG
+            // -> Từ chối di chuyển. Ép Client quay về vị trí cũ (Rubber-banding)
+            _ = BroadcastOnlyInWorldAsync(new S_TeleportPacket
+            {
+                SessionId = sessionId,
+                TargetPosition = state.Position
+            });
+        }
     }
-
     private void HandleLeaveRoom(int sessionId, C_LeaveRoomPacket packet)
     {
         if (_sessions.TryGetValue(sessionId, out var session))
@@ -249,9 +291,9 @@ public class GameRoom
 
         var chatPacket = new S_ChatPacket
         {
-            SenderId   = sessionId,
+            SenderId = sessionId,
             SenderName = session.PlayerName,
-            Message    = packet.Message[..Math.Min(packet.Message.Length, 200)] // giới hạn 200 ký tự
+            Message = packet.Message[..Math.Min(packet.Message.Length, 200)] // giới hạn 200 ký tự
         };
 
         // Broadcast trong game loop thread — fire-and-forget
@@ -268,7 +310,7 @@ public class GameRoom
         var worldState = new S_WorldStatePacket
         {
             ServerTick = _serverTick,
-            Players    = _playerStates.Values.ToList()
+            Players = _playerStates.Values.ToList()
         };
 
         await BroadcastAsync(worldState, token);
@@ -292,6 +334,54 @@ public class GameRoom
         var tasks = _sessions.Values
             .Where(s => s.SessionId != excludeSessionId)
             .Select(s => s.SendAsync(packet));
+
+        await Task.WhenAll(tasks);
+    }
+    private async Task BroadcastInWorldAsync(BasePacket packet, CancellationToken token = default)
+    {
+        var tasks = _sessions.Values
+            .Where(s => s.CurrentRoom == this && _playerStates.ContainsKey(s.SessionId))
+            .Select(s => s.SendAsync(packet, token)
+                          .ContinueWith(t =>
+                          {
+                              if (t.IsFaulted)
+                                  _sessions.TryRemove(s.SessionId, out _);
+                          }, token));
+
+        await Task.WhenAll(tasks);
+    }
+    private async Task BroadcastExceptInWorldAsync(int excludeSessionId, BasePacket packet, CancellationToken token = default)
+    {
+        var targets = _sessions.Values
+            .Where(s => s.SessionId != excludeSessionId && s.CurrentRoom == this && _playerStates.ContainsKey(s.SessionId))
+            .ToList();
+
+        var tasks = targets.Select(async s =>
+        {
+            try
+            {
+                await s.SendAsync(packet, token);
+            }
+            catch
+            {
+                _sessions.TryRemove(s.SessionId, out _);
+                _playerStates.TryRemove(s.SessionId, out _);
+                s.CurrentRoom = null;
+            }
+        });
+
+        await Task.WhenAll(tasks);
+    }
+    private async Task BroadcastOnlyInWorldAsync(BasePacket packet, CancellationToken token = default)
+    {
+        var tasks = _sessions.Values
+            .Where(s => s.CurrentRoom == this && _playerStates.ContainsKey(s.SessionId))
+            .Select(s => s.SendAsync(packet, token)
+                          .ContinueWith(t =>
+                          {
+                              if (t.IsFaulted)
+                                  _sessions.TryRemove(s.SessionId, out _);
+                          }, token));
 
         await Task.WhenAll(tasks);
     }

@@ -48,9 +48,28 @@ public class RoomManager
 
         await room.AddSessionAsync(session);
     }
-
+    public async Task HandleJoinWorldAsync(ClientSession session, string roomId)
+    {
+        if (_rooms.TryGetValue(roomId, out var room))
+        {
+            await room.AddPlayerInWorldAsync(session, CancellationToken.None);
+        }
+    }
     public GameRoom? GetRoom(string roomId) =>
         _rooms.TryGetValue(roomId, out var r) ? r : null;
 
-    public IEnumerable<GameRoom> GetAllRooms() => _rooms.Values;
+    public List<RoomInfo> GetAllRooms()
+    {
+        var rooms = new List<RoomInfo>();
+        foreach (var room in _rooms.Values)
+        {
+            rooms.Add(new RoomInfo
+            {
+                RoomId = room.RoomId,
+                PlayerCount = room.PlayerCount,
+                MaxPlayer = room.MaxPlayer
+            });
+        }
+        return rooms;
+    }
 }

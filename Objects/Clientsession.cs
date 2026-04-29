@@ -76,25 +76,42 @@ public class ClientSession
                 // C_JoinRoom → RoomManager xử lý (không thuộc room nào)
                 // Còn lại     → Room.InputQueue (game loop thread xử lý)
                 // ====================================================
-                if (packet is C_JoinRoomPacket joinPacket)
+                if (packet is C_InputPacket)
+                {
+                        _logger.LogInformation($"[Session {SessionId}] Nhận C_InputPacket từ client");
+                        _logger.LogInformation($"[Session {SessionId}] CurrentRoom: {(CurrentRoom != null ? $"RoomId={CurrentRoom.RoomId}" : "NULL")}");
+
+                    // Input packet → enqueue vào room input queue để game loop xử lý
+                    if (CurrentRoom != null)
+                    {
+                        CurrentRoom.EnqueueInput(new IncomingPacket
+                        {
+                            SessionId = SessionId,
+                            Packet = packet
+                        });
+                        _logger.LogInformation($"[Session {SessionId}] ✓ Đã enqueue input packet vào room");
+                    }
+                    else
+                    {
+                        _logger.LogWarning($"[Session {SessionId}] ✗ CurrentRoom=NULL, không enqueue được");
+                    }
+                }
+                else if (packet is C_GetRoomsPacket)
+                {
+                    // Yêu cầu danh sách phòng — xử lý trực tiếp ở đây
+                    await SendAsync(new S_ListRoomsPacket { PlayerId = SessionId, Rooms = roomManager.GetAllRooms() }, token);
+                }
+                else if (packet is C_JoinRoomPacket joinPacket)
                 {
                     // Join room không qua game loop — xử lý trực tiếp ở đây
                     // vì session chưa thuộc room nào
                     await roomManager.HandleJoinRoomAsync(this, joinPacket.RoomId ?? "");
                 }
-                else if (CurrentRoom != null)
+                else if (packet is C_JoinWorldPacket joinWorldPacket)
                 {
-                    // Enqueue vào InputQueue của room → game loop thread sẽ xử lý
-                    CurrentRoom.EnqueueInput(new IncomingPacket
-                    {
-                        SessionId = SessionId,
-                        Packet = packet
-                    });
-                }
-                else
-                {
-                    // Client gửi packet nhưng chưa join room
-                    await SendAsync(new S_ErrorPacket { Message = "Bạn chưa vào phòng nào." }, token);
+                    _logger.LogInformation($"[Session {SessionId}] Yêu cầu vào world: {joinWorldPacket.RoomId}");
+                    // Join world không qua game loop — xử lý trực tiếp ở đây
+                    await roomManager.HandleJoinWorldAsync(this, joinWorldPacket.RoomId ?? "");
                 }
             }
         }
@@ -203,6 +220,8 @@ public class ClientSession
             PacketType.C_JoinRoom => JsonSerializer.Deserialize<C_JoinRoomPacket>(jsonSpan),
             PacketType.C_LeaveRoom => JsonSerializer.Deserialize<C_LeaveRoomPacket>(jsonSpan),
             // PacketType.C_Chat      => JsonSerializer.Deserialize<C_ChatPacket>(jsonSpan),
+            PacketType.C_GetRooms => JsonSerializer.Deserialize<C_GetRoomsPacket>(jsonSpan),
+            PacketType.C_JoinWorld => JsonSerializer.Deserialize<C_JoinWorldPacket>(jsonSpan),
             _ => null
         };
     }
