@@ -46,7 +46,8 @@ public class C_InputPacket : BasePacket
     public bool Attack { get; set; }
     public int Tick { get; set; }
     public float DeltaTime { get; set; }
-    public PlayerState? PlayerState { get; set; }
+    public bool isNumber1 { get; set; }
+    public PlayerState? PlayerState { get; set; } = new();
 }
 
 
@@ -90,16 +91,15 @@ public struct PlayerInfo
     public int PlayerId { get; set; }
     public string PlayerName { get; set; }
 }
-public struct PlayerState
+public class PlayerState
 {
     public int PlayerId { get; set; }
-    public string PlayerName { get; set; } 
+    public string PlayerName { get; set; } = "";
     public float X { get; set; }
     public float Y { get; set; }
     public float VelX { get; set; }
     public float VelY { get; set; }
-    public string AnimState { get; set; }
-    public Vector2 Position { get; set; }
+    public string AnimState { get; set; } = "idle"; // idle, run, jump, attack, etc.
 }
 
 public class S_PlayerJoinedPacket : BasePacket
