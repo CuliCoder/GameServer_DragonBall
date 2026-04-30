@@ -39,12 +39,29 @@ public class GameRoom
 
     // Tick counter để điều tiết broadcast
     private int _serverTick = 0;
-
-    public GameRoom(string roomId, int maxPlayer, ILogger logger)
+    public Dictionary<int, Boss> bosses { get; private set; } = new Dictionary<int, Boss>
+    {
+        [1] = new Boss
+        {
+            BossId = 1,
+            Type = BossType.Broly,
+            Position = new Vector2(0, 0),
+            HpMax = 20000000,
+            HpCurrent = 20000000,
+            Level = 1,
+            Speed = 3f,
+            SpawnTime = DateTime.Now
+        }
+    };
+    public GameRoom(string roomId, int maxPlayer, ILogger logger, Dictionary<int, Boss>? bosses = null)
     {
         RoomId = roomId;
         MaxPlayer = maxPlayer;
         _logger = logger;
+        if (bosses != null)
+        {
+            this.bosses = bosses;
+        }
 
         // Khởi tạo dispatcher — đăng ký handler cho từng PacketType
         _dispatcher = new PacketDispatcher();
@@ -62,6 +79,7 @@ public class GameRoom
         _dispatcher.Register<C_InputPacket>(PacketType.C_Input, HandleInput);
         _dispatcher.Register<C_LeaveRoomPacket>(PacketType.C_LeaveRoom, HandleLeaveRoom);
         _dispatcher.Register<C_ChatPacket>(PacketType.C_Chat, HandleChat);
+        _dispatcher.Register<C_AttackBossPacket>(PacketType.C_AttackBoss, HandleAttackBoss);
         // Thêm packet mới: _dispatcher.Register<C_AttackPacket>(PacketType.C_Attack, HandleAttack);
     }
 
@@ -178,30 +196,22 @@ public class GameRoom
             }
 
             // -------------------------------------------------------
-            // PHASE 2: PHYSICS SIMULATION
-            // Cập nhật vị trí dựa trên velocity (đơn giản hóa)
-            // Thực tế: dùng physics engine hoặc tính toán phức tạp hơn
-            // -------------------------------------------------------
-            // foreach (var state in _playerStates.Values)
-            // {
-            //     SimulatePlayer(state, FIXED_DELTA);
-            // }
-
-            // -------------------------------------------------------
-            // PHASE 3: GAME LOGIC
-            // Collision detection, damage, event triggers...
-            // -------------------------------------------------------
-            // ProcessCollisions();
-            // ProcessCombat();
-            // ProcessEvents();
-
+            // PHASE 2: Cập nhật game logic (physics, AI, v.v)
+            if (bosses.Count > 0)
+            {
+                foreach (var boss in bosses.Values)
+                {
+                    BossHandler.UpdateBossAI(boss, this);
+                }
+            }
             // -------------------------------------------------------
             // PHASE 4: BROADCAST — gửi world state cho mọi player
             // -------------------------------------------------------
             _serverTick++;
             if (_serverTick % BROADCAST_EVERY_N_TICKS == 0)
             {
-                await BroadcastWorldStateAsync(token);
+                TryBroadcastWorldState(token);
+                await BroadcastBossStateAsync();
             }
 
             // Tính thời điểm tick tiếp theo
@@ -218,29 +228,14 @@ public class GameRoom
 
         _logger.LogInformation($"[Room {RoomId}] Fixed update loop kết thúc.");
     }
-
-    // ============================================================
-    //  PHYSICS — cập nhật vị trí player
-    // ============================================================
-    // private static void SimulatePlayer(PlayerState state, float delta)
-    // {
-    //     const float SPEED = 5f;
-
-    //     state.X += state.VelX * SPEED * delta;
-    //     state.Y += state.VelY * SPEED * delta;
-
-    //     // Clamp trong map bounds (ví dụ)
-    //     state.X = Math.Clamp(state.X, -100f, 100f);
-    //     state.Y = Math.Clamp(state.Y, -100f, 100f);
-
-    //     // Cập nhật animation state
-    //     state.AnimState = (Math.Abs(state.VelX) > 0.01f || Math.Abs(state.VelY) > 0.01f) ? "run" : "idle";
-    // }
-
     // ============================================================
     //  PACKET HANDLERS — mỗi handler xử lý 1 loại packet
     //  Được gọi bởi Dispatcher trong game loop thread
     // ============================================================
+    private void HandleAttackBoss(int sessionId, C_AttackBossPacket packet)
+    {
+        _ = BossHandler.HandleAttackBossAsync(this, sessionId, packet);
+    }
     private void HandleInput(int sessionId, C_InputPacket packet)
     {
         if (!_playerStates.TryGetValue(sessionId, out PlayerState? state))
@@ -256,6 +251,7 @@ public class GameRoom
         const float FLY_VEL_Y = 0.1f;  // velocity khi nhấn bay lên
         const float GRAVITY = -1f;   // gia tốc rơi (units/s² nhân deltaTime)
         const float TOLERANCE = 2f;  // dung sai mạng (giảm xuống để chặt hơn)
+        const float TELEPORT_THRESHOLD = 6f;
 
         float dt = packet.DeltaTime;
         var targetPos = new Vector2(packet.PlayerState?.X ?? state.X, packet.PlayerState?.Y ?? state.Y);
@@ -300,19 +296,35 @@ public class GameRoom
         if (validX && validY)
         {
             // ✅ HỢP LỆ — cập nhật state (modify properties, KHÔNG gán lại biến)
-            state.X        = packet.PlayerState?.X ?? state.X;     // sync để BroadcastWorldState đọc đúng
-            state.Y        = packet.PlayerState?.Y ?? state.Y;
-            state.VelX     = packet.PlayerState?.VelX ?? state.VelX;     // lấy từ input client gửi lên (đã validate max speed)
-            state.VelY     = packet.PlayerState?.VelY ?? state.VelY;    // lưu lại để tính gravity tick tiếp
+            state.X = packet.PlayerState?.X ?? state.X;     // sync để BroadcastWorldState đọc đúng
+            state.Y = packet.PlayerState?.Y ?? state.Y;
+            state.VelX = packet.PlayerState?.VelX ?? state.VelX;     // lấy từ input client gửi lên (đã validate max speed)
+            state.VelY = packet.PlayerState?.VelY ?? state.VelY;    // lưu lại để tính gravity tick tiếp
             state.AnimState = packet.PlayerState?.AnimState ?? state.AnimState; // sync animation state (có thể dùng để trigger hiệu ứng khác)
-            // state = packet.PlayerState ?? state; // Cập nhật toàn bộ state từ client (giả sử đã validate)
+            if (packet.isNumber1)
+            {
+                state.AnimState = "boom";
+                state.VelX = 0f;
+            }
         }
         else
         {
             // ❌ HACK SPEED hoặc lag nặng → rubber-band về vị trí server đang lưu
             string reason = !validX ? $"X vượt ({deltaX:F2}>{maxDeltaX:F2})"
                                     : $"Y vượt ({deltaY:F2}>{TOLERANCE:F2}, expectedY={expectedY:F2})";
-            _logger.LogWarning($"[Room {RoomId}] Player {sessionId} bị rubber-band: {reason}");
+            float drift = Vector2.Distance(targetPos, new Vector2(state.X, state.Y));
+            _logger.LogDebug($"[Room {RoomId}] Player {sessionId} lệch state: {reason}, drift={drift:F2}");
+
+            // Chỉ teleport cứng khi lệch quá lớn để tránh giật lùi liên tục do jitter mạng.
+            if (drift < TELEPORT_THRESHOLD)
+            {
+                state.X = targetPos.X;
+                state.Y = targetPos.Y;
+                state.VelX = packet.PlayerState?.VelX ?? state.VelX;
+                state.VelY = packet.PlayerState?.VelY ?? state.VelY;
+                state.AnimState = packet.PlayerState?.AnimState ?? state.AnimState;
+                return;
+            }
 
             _ = BroadcastOnlyInWorldAsync(new S_TeleportPacket
             {
@@ -348,20 +360,73 @@ public class GameRoom
     // ============================================================
     //  BROADCAST — gửi tới tất cả hoặc trừ 1 session
     // ============================================================
-    private async Task BroadcastWorldStateAsync(CancellationToken token)
+    private void BroadcastWorldStateAsync(CancellationToken token)
     {
         if (_sessions.IsEmpty) return;
 
         var worldState = new S_WorldStatePacket
         {
             ServerTick = _serverTick,
-            Players = _playerStates.Values.ToList()
+            // Snapshot để tránh giữ reference mutable làm packet bị stale/không nhất quán.
+            Players = _playerStates.Values.Select(p => new PlayerState
+            {
+                PlayerId = p.PlayerId,
+                PlayerName = p.PlayerName,
+                X = p.X,
+                Y = p.Y,
+                VelX = p.VelX,
+                VelY = p.VelY,
+                AnimState = p.AnimState
+            }).ToList()
         };
 
-        await BroadcastAsync(worldState, token);
+        var targets = _sessions.Values
+            .Where(s => s.CurrentRoom == this && _playerStates.ContainsKey(s.SessionId))
+            .ToList();
+
+        foreach (var session in targets)
+        {
+            _ = session.SendAsync(worldState, token).ContinueWith(t =>
+            {
+                if (!t.IsFaulted) return;
+                _sessions.TryRemove(session.SessionId, out _);
+                _playerStates.TryRemove(session.SessionId, out _);
+                session.CurrentRoom = null;
+            }, TaskScheduler.Default);
+        }
+    }
+    private async Task BroadcastBossStateAsync()
+    {
+        if (bosses.Count == 0 || bosses.Values.All(b => b.IsDead))
+            return;
+
+        foreach (var boss in bosses.Values)
+        {
+            await BroadcastInWorldAsync(new S_BossStatePacket
+            {
+                BossId = boss.BossId,
+                BossType = boss.Type,
+                BossX = boss.Position.X,
+                BossY = boss.Position.Y,
+                HpCurrent = boss.HpCurrent,
+                HpMax = boss.HpMax,
+                AnimState = boss.AnimState
+            });
+        }
+    }
+    private void TryBroadcastWorldState(CancellationToken token)
+    {
+        try
+        {
+            BroadcastWorldStateAsync(token);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning($"[Room {RoomId}] Broadcast world state lỗi: {ex.GetBaseException().Message}");
+        }
     }
 
-    private async Task BroadcastAsync(BasePacket packet, CancellationToken token = default)
+    public async Task BroadcastAsync(BasePacket packet, CancellationToken token = default)
     {
         var tasks = _sessions.Values
             .Select(s => s.SendAsync(packet, token)
@@ -430,4 +495,9 @@ public class GameRoom
 
         await Task.WhenAll(tasks);
     }
+    // ============================================================
+    public ClientSession? GetSession(int sessionId) =>
+        _sessions.TryGetValue(sessionId, out var s) ? s : null;
+    public PlayerState? GetFirstPlayer() =>
+        _playerStates.Values.FirstOrDefault();
 }

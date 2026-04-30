@@ -78,9 +78,6 @@ public class ClientSession
                 // ====================================================
                 if (packet is C_InputPacket)
                 {
-                        _logger.LogInformation($"[Session {SessionId}] Nhận C_InputPacket từ client");
-                        _logger.LogInformation($"[Session {SessionId}] CurrentRoom: {(CurrentRoom != null ? $"RoomId={CurrentRoom.RoomId}" : "NULL")}");
-
                     // Input packet → enqueue vào room input queue để game loop xử lý
                     if (CurrentRoom != null)
                     {
@@ -89,11 +86,10 @@ public class ClientSession
                             SessionId = SessionId,
                             Packet = packet
                         });
-                        _logger.LogInformation($"[Session {SessionId}] ✓ Đã enqueue input packet vào room");
                     }
                     else
                     {
-                        _logger.LogWarning($"[Session {SessionId}] ✗ CurrentRoom=NULL, không enqueue được");
+                        _logger.LogDebug($"[Session {SessionId}] Bỏ input vì chưa vào room.");
                     }
                 }
                 else if (packet is C_GetRoomsPacket)
@@ -219,9 +215,10 @@ public class ClientSession
             PacketType.C_Input => JsonSerializer.Deserialize<C_InputPacket>(jsonSpan),
             PacketType.C_JoinRoom => JsonSerializer.Deserialize<C_JoinRoomPacket>(jsonSpan),
             PacketType.C_LeaveRoom => JsonSerializer.Deserialize<C_LeaveRoomPacket>(jsonSpan),
-            // PacketType.C_Chat      => JsonSerializer.Deserialize<C_ChatPacket>(jsonSpan),
+            PacketType.C_Chat => JsonSerializer.Deserialize<C_ChatPacket>(jsonSpan),
             PacketType.C_GetRooms => JsonSerializer.Deserialize<C_GetRoomsPacket>(jsonSpan),
             PacketType.C_JoinWorld => JsonSerializer.Deserialize<C_JoinWorldPacket>(jsonSpan),
+            PacketType.C_AttackBoss => JsonSerializer.Deserialize<C_AttackBossPacket>(jsonSpan),
             _ => null
         };
     }

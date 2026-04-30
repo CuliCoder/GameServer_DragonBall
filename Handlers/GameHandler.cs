@@ -1,63 +1,93 @@
-// using Shared.Packets;
-// namespace Handlers;
-// public static class GameHandler
-// {
-    // public static async void OnPlayerMove(int sessionId, C_PlayerMovePacket pkt)
-    // {
-    //     var room = RoomManager.Instance.GetRoomBySession(sessionId);
-    //     if (room == null) return;
+using Shared;
+using System.Numerics;
 
-    //     var session = SessionManager.Instance.Get(sessionId);
 
-    //     // Broadcast cho các người KHÁC trong phòng
-    //     var others = room.SessionIds.Where(id => id != sessionId);
-    //     await SessionManager.Instance.Broadcast(others, new S_PlayerMovePacket {
-    //         PlayerId  = session.PlayerId,
-    //         X = pkt.X, Y = pkt.Y, Z = pkt.Z,
-    //         Rotation  = pkt.Rotation,
-    //         AnimState = pkt.AnimState
-    //     });
-    // }
+public static class BossHandler
+{
+    // Xử lý khi player tấn công boss
+    public static async Task HandleAttackBossAsync(
+        GameRoom room,
+        int sessionId,
+        C_AttackBossPacket packet)
+    {
+        if (room.bosses.TryGetValue(packet.BossId, out Boss? boss) == false || boss.IsDead)
+            return;
 
-    // public static async void OnHitBoss(int sessionId, C_HitBossPacket pkt)
-    // {
-    //     var room    = RoomManager.Instance.GetRoomBySession(sessionId);
-    //     var session = SessionManager.Instance.Get(sessionId);
-    //     if (room?.Boss == null || room.Boss.IsDead) return;
+        var session = room.GetSession(sessionId);
+        if (session == null)
+            return;
 
-    //     // Server tự tính damage thật (chống hack)
-    //     int realDamage = CalculateDamage(session.PlayerId, pkt.SkillId);
-    //     room.Boss.HpCurrent -= realDamage;
+        // ❌ CHỐNG HACK: Server tự tính damage, không tin client
+        int realDamage = CalculateBossDamage(sessionId, packet.SkillId);
 
-    //     // Broadcast HP mới
-    //     await SessionManager.Instance.Broadcast(room.SessionIds, new S_BossHpPacket {
-    //         HpCurrent       = room.Boss.HpCurrent,
-    //         HpMax           = room.Boss.HpMax,
-    //         LastHitPlayerId = session.PlayerId,
-    //         Damage          = realDamage
-    //     });
+        boss.HpCurrent -= realDamage;
+        boss.LastDamagePlayerId = sessionId;
+        boss.TotalDamageReceived += realDamage;
 
-    //     if (room.Boss.HpCurrent <= 0)
-    //     {
-    //         room.Boss.IsDead = true;
-    //         await SessionManager.Instance.Broadcast(room.SessionIds, new S_GameResultPacket {
-    //             IsVictory = true,
-    //             ClearTime = room.GetElapsedSeconds(),
-    //             ExpGain   = 500,
-    //             GoldGain  = 200
-    //         });
-    //     }
-    // }
-//     private static int CalculateDamage(int playerId, int skillId)
-//         => new Random().Next(100, 300); // thay bằng logic thật
-// }
+        // 📤 Broadcast HP Boss update cho tất cả player
+        await room.BroadcastAsync(new S_BossStatePacket
+        {
+            HpCurrent = boss.HpCurrent,
+            HpMax = boss.HpMax,
+        });
 
-// public static class SystemHandler
-// {
-//     public static async void OnPing(int sessionId, C_PingPacket pkt)
-//     {
-//         await SessionManager.Instance.SendTo(sessionId, new S_PongPacket {
-//             Timestamp = pkt.Timestamp
-//         });
-//     }
-// }
+        // Boss chết
+        if (boss.HpCurrent <= 0)
+        {
+            await DefeatBossAsync(room, packet.BossId);
+        }
+    }
+
+    // Boss logic mỗi frame (chạy trong FixedUpdate)
+    public static void UpdateBossAI(Boss boss, GameRoom room)
+    {
+        if (boss.IsDead) return;
+
+        // TODO: AI logic - nhắm về player gần nhất, tấn công, v.v
+        // Ví dụ: Boss đi về phía player đầu tiên
+        var firstPlayer = room.GetFirstPlayer();
+        if (firstPlayer != null)
+        {
+            Vector2 direction = Vector2.Normalize(
+                new Vector2(firstPlayer.X, firstPlayer.Y) - boss.Position
+            );
+            boss.Position += direction * boss.Speed * 0.016f; // 60fps
+        }
+    }
+
+    private static async Task DefeatBossAsync(GameRoom room, int bossId)
+    {
+        if (!room.bosses.TryGetValue(bossId, out Boss? boss))
+            return;
+
+        boss.IsDead = true;
+        var elapsedSeconds = (DateTime.Now - boss.SpawnTime).TotalSeconds;
+
+        // Tính reward dựa trên damage
+        // var playerDamages = room.GetPlayerDamageStats(); // Hàm phụ để lấy damage stats
+
+        await room.BroadcastAsync(new S_BossDefeatPacket
+        {
+            BossId = boss.BossId,
+            LastHitPlayerId = boss.LastDamagePlayerId,
+            ClearTimeMs = (long)(elapsedSeconds * 1000),
+            TotalExpReward = 5000,
+            TotalGoldReward = 2000
+        });
+    }
+
+    private static int CalculateBossDamage(int playerId, int skillId)
+    {
+        // TODO: Lấy stat từ database hoặc cache
+        // ví dụ: player damage (100-300) + skill bonus
+        int baseDamage = new Random().Next(100, 300);
+
+        // Skill bonus
+        return skillId switch
+        {
+            1 => (int)(baseDamage * 1.2f), // Skill 1 - 20% bonus
+            2 => (int)(baseDamage * 1.5f), // Skill 2 - 50% bonus
+            _ => baseDamage
+        };
+    }
+}

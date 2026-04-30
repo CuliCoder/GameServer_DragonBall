@@ -15,6 +15,7 @@ public enum PacketType : ushort
     C_Chat = 4,   // Tin nhắn chat
     C_GetRooms = 5,
     C_JoinWorld = 6,
+    C_AttackBoss = 7,      // Client tấn công Boss
     // --- Server → Client ---
     S_WorldState = 100, // Broadcast vị trí TẤT CẢ player trong room (mỗi tick)
     S_PlayerJoined = 101, // Thông báo có người vào phòng
@@ -25,6 +26,9 @@ public enum PacketType : ushort
     S_ListRooms = 106, // Danh sách phòng hiện có (dùng cho lobby)
     S_JoinWorld = 107, // Xác nhận vào world thành công
     S_Teleport = 108, // Teleport player
+    S_BossState = 200,     // Server broadcast trạng thái Boss
+    S_BossDefeated = 201,  // Boss đã hạ gục
+    S_BossHpUpdate = 202,  // Cập nhật HP Boss
 }
 // ============================================================
 //  BASE PACKET — mọi packet đều kế thừa
@@ -37,6 +41,14 @@ public abstract class BasePacket
 // ============================================================
 //  CLIENT → SERVER PACKETS
 // ============================================================
+public class C_AttackBossPacket : BasePacket
+{
+    public override PacketType Type => PacketType.C_AttackBoss;
+    public int BossId { get; set; }       // ID của boss đang tấn công
+    public int SkillId { get; set; }        // Loại skill
+    public float AttackX { get; set; }      // Vị trí tấn công
+    public float AttackY { get; set; }
+}
 public class C_InputPacket : BasePacket
 {
     public override PacketType Type => PacketType.C_Input;
@@ -80,6 +92,27 @@ public class C_JoinWorldPacket : BasePacket
 // ============================================================
 //  SERVER → CLIENT PACKETS
 // ============================================================
+public class S_BossStatePacket : BasePacket
+{
+    public override PacketType Type => PacketType.S_BossState;
+    public BossType BossType { get; set; }
+    public int BossId { get; set; }
+    public float BossX { get; set; }
+    public float BossY { get; set; }
+    public int HpCurrent { get; set; }
+    public int HpMax { get; set; }
+    public string AnimState { get; set; } = "idle"; // idle, run, attack, die, etc.
+}
+
+public class S_BossDefeatPacket : BasePacket
+{
+    public override PacketType Type => PacketType.S_BossDefeated;
+    public int BossId { get; set; }
+    public int LastHitPlayerId { get; set; }
+    public long ClearTimeMs { get; set; }
+    public int TotalExpReward { get; set; }
+    public int TotalGoldReward { get; set; }
+}
 public class S_WorldStatePacket : BasePacket
 {
     public override PacketType Type => PacketType.S_WorldState;
@@ -101,7 +134,31 @@ public class PlayerState
     public float VelY { get; set; }
     public string AnimState { get; set; } = "idle"; // idle, run, jump, attack, etc.
 }
-
+// File: Models/Boss.cs
+public class Boss
+{
+    public int BossId { get; set; }
+    public BossType Type { get; set; }
+    public Vector2 Position { get; set; }
+    public Vector2 Velocity { get; set; }
+    
+    public int HpMax { get; set; }
+    public int HpCurrent { get; set; }
+    public bool IsDead { get; set; }
+    
+    public int Level { get; set; }
+    public float Speed { get; set; }
+    public string AnimState { get; set; } = "idle"; // idle, run, attack, die, etc.
+    
+    public int LastDamagePlayerId { get; set; }
+    public DateTime SpawnTime { get; set; }
+    public int TotalDamageReceived { get; set; }
+}
+public enum BossType
+{
+    Broly = 1,
+    SuperBroly = 2,
+}
 public class S_PlayerJoinedPacket : BasePacket
 {
     public override PacketType Type => PacketType.S_PlayerJoined;
