@@ -211,7 +211,6 @@ public class GameRoom
             if (_serverTick % BROADCAST_EVERY_N_TICKS == 0)
             {
                 TryBroadcastWorldState(token);
-                await BroadcastBossStateAsync();
             }
 
             // Tính thời điểm tick tiếp theo
@@ -395,25 +394,7 @@ public class GameRoom
             }, TaskScheduler.Default);
         }
     }
-    private async Task BroadcastBossStateAsync()
-    {
-        if (bosses.Count == 0 || bosses.Values.All(b => b.IsDead))
-            return;
-
-        foreach (var boss in bosses.Values)
-        {
-            await BroadcastInWorldAsync(new S_BossStatePacket
-            {
-                BossId = boss.BossId,
-                BossType = boss.Type,
-                BossX = boss.Position.X,
-                BossY = boss.Position.Y,
-                HpCurrent = boss.HpCurrent,
-                HpMax = boss.HpMax,
-                AnimState = boss.AnimState
-            });
-        }
-    }
+    
     private void TryBroadcastWorldState(CancellationToken token)
     {
         try
@@ -447,7 +428,7 @@ public class GameRoom
 
         await Task.WhenAll(tasks);
     }
-    private async Task BroadcastInWorldAsync(BasePacket packet, CancellationToken token = default)
+    public async Task BroadcastInWorldAsync(BasePacket packet, CancellationToken token = default)
     {
         var tasks = _sessions.Values
             .Where(s => s.CurrentRoom == this && _playerStates.ContainsKey(s.SessionId))
@@ -482,7 +463,7 @@ public class GameRoom
 
         await Task.WhenAll(tasks);
     }
-    private async Task BroadcastOnlyInWorldAsync(BasePacket packet, CancellationToken token = default)
+    public async Task BroadcastOnlyInWorldAsync(BasePacket packet, CancellationToken token = default)
     {
         var tasks = _sessions.Values
             .Where(s => s.CurrentRoom == this && _playerStates.ContainsKey(s.SessionId))

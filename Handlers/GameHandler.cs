@@ -25,10 +25,15 @@ public static class BossHandler
         boss.TotalDamageReceived += realDamage;
 
         // 📤 Broadcast HP Boss update cho tất cả player
-        await room.BroadcastAsync(new S_BossStatePacket
+        await room.BroadcastOnlyInWorldAsync(new S_BossStatePacket
         {
+            BossType = boss.Type,
+            BossId = boss.BossId,
+            BossX = boss.Position.X,
+            BossY = boss.Position.Y,
             HpCurrent = boss.HpCurrent,
             HpMax = boss.HpMax,
+            AnimState = boss.AnimState
         });
 
         // Boss chết
@@ -53,8 +58,17 @@ public static class BossHandler
             );
             boss.Position += direction * boss.Speed * 0.016f; // 60fps
         }
+        _ = room.BroadcastInWorldAsync(new S_BossStatePacket
+        {
+            BossType = boss.Type,
+            BossId = boss.BossId,
+            BossX = boss.Position.X,
+            BossY = boss.Position.Y,
+            HpCurrent = boss.HpCurrent,
+            HpMax = boss.HpMax,
+            AnimState = boss.AnimState
+        });
     }
-
     private static async Task DefeatBossAsync(GameRoom room, int bossId)
     {
         if (!room.bosses.TryGetValue(bossId, out Boss? boss))
