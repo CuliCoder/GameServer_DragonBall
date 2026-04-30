@@ -94,12 +94,15 @@ public class GameRoom
             return;
         }
 
+        float spawnX = -10f + _playerStates.Count * 3f;
+        float spawnY = 20f;
         _playerStates[session.SessionId] = new PlayerState
         {
             PlayerId = session.SessionId,
             PlayerName = session.PlayerName,
-            X = -10f + (_playerStates.Count - 1) * 3f,
-            Y = 20f,
+            X = spawnX,
+            Y = spawnY,
+            Position = new Vector2(spawnX, spawnY), // khởi tạo để HandleInput tính distance đúng
             VelX = 0f,
             VelY = 0f,
             AnimState = "idle"
@@ -241,37 +244,78 @@ public class GameRoom
     // ============================================================
     private void HandleInput(int sessionId, C_InputPacket packet)
     {
-            _logger.LogInformation($"[Room {RoomId}] HandleInput gọi cho Player {sessionId}");
-
-            if (!_playerStates.TryGetValue(sessionId, out PlayerState? state))
-            {
-                _logger.LogWarning($"[Room {RoomId}] Player {sessionId} không tìm thấy trong _playerStates");
-                return;
-            }
-
-            _logger.LogInformation($"[Room {RoomId}] Player {sessionId} di chuyển từ {new Vector2(packet.CurrentPositionX, packet.CurrentPositionY)} tới {new Vector2(packet.TargetPositionX, packet.TargetPositionY)}");
-        // Cấu hình giới hạn
-        float maxSpeed = 10f;
-        float networkTolerance = 10.0f; // Sai số cho phép do lag mạng (Ping)
-
-        // Tính khoảng cách từ điểm cũ đến điểm Client muốn tới
-        float distanceMoved = Vector2.Distance(state.Position, new Vector2(packet.TargetPositionX, packet.TargetPositionY));
-
-        // Tính quãng đường TỐI ĐA nhân vật có thể đi được trong khoảng thời gian deltaTime
-        float maxAllowedDistance = (Math.Abs(packet.DirX) * maxSpeed * packet.DeltaTime) + networkTolerance;
-
-        if (distanceMoved <= maxAllowedDistance)
+        if (!_playerStates.TryGetValue(sessionId, out PlayerState state))
         {
-            // HỢP LỆ: Cập nhật vị trí mới
-            state.Position = new Vector2(packet.TargetPositionX, packet.TargetPositionY);
+            _logger.LogWarning($"[Room {RoomId}] Player {sessionId} không tìm thấy trong _playerStates");
+            return;
+        }
+ 
+        // ============================================================
+        // Hằng số — phải khớp với LocalPlayerController
+        // ============================================================
+        const float MAX_SPEED_X  = 5f;    // LocalPlayerController.SPEED
+        const float FLY_VEL_Y    = 0.1f;  // velocity khi nhấn bay lên
+        const float GRAVITY      = -1f;   // gia tốc rơi (units/s² nhân deltaTime)
+        const float TOLERANCE    = 0.5f;  // dung sai mạng (giảm xuống để chặt hơn)
+ 
+        float dt = packet.DeltaTime;
+        var targetPos = new Vector2(packet.PlayerState?.X ?? 0, packet.PlayerState?.Y ?? 0);
+ 
+        // ============================================================
+        // VALIDATE X — di chuyển ngang
+        // ============================================================
+        float deltaX     = Math.Abs(targetPos.X - state.Position.X);
+        float maxDeltaX  = Math.Abs(packet.DirX) * MAX_SPEED_X * dt + TOLERANCE;
+        bool validX      = deltaX <= maxDeltaX;
+ 
+        // ============================================================
+        // VALIDATE Y — bay lên hoặc rơi theo trọng lực
+        //
+        // Server tự tính VelY kỳ này dựa vào state VelY kỳ trước:
+        //   - Fly==true  → VelY = FLY_VEL_Y (nhấn bay)
+        //   - Fly==false → VelY = state.VelY + GRAVITY * dt (rơi tự do)
+        //
+        // Sau đó so sánh Y client gửi với Y server dự đoán.
+        // ============================================================
+        float expectedVelY;
+        if (packet.Fly)
+        {
+            expectedVelY = FLY_VEL_Y; // đang bay lên, vận tốc cố định
         }
         else
         {
-            // PHÁT HIỆN HACK SPEED HOẶC LỖI MẠNG NẶNG
-            // -> Từ chối di chuyển. Ép Client quay về vị trí cũ (Rubber-banding)
+            // Trọng lực tích lũy từng tick
+            expectedVelY = state.VelY + GRAVITY * dt;
+        }
+ 
+        float expectedY  = state.Position.Y + expectedVelY;
+        float deltaY     = Math.Abs(targetPos.Y - expectedY);
+        bool validY      = deltaY <= TOLERANCE;
+ 
+        // ============================================================
+        // KẾT QUẢ
+        // ============================================================
+        if (validX && validY)
+        {
+            // ✅ HỢP LỆ — cập nhật state (modify properties, KHÔNG gán lại biến)
+            // state.Position = targetPos;
+            // state.X        = targetPos.X;     // sync để BroadcastWorldState đọc đúng
+            // state.Y        = targetPos.Y;
+            // state.VelX     = packet.DirX * MAX_SPEED_X * dt;
+            // state.VelY     = expectedVelY;    // lưu lại để tính gravity tick tiếp
+            // state.AnimState = Math.Abs(packet.DirX) > 0.01f ? "run" : "idle";
+            state = packet.PlayerState ?? state; // Cập nhật toàn bộ state từ client (giả sử đã validate)
+        }
+        else
+        {
+            // ❌ HACK SPEED hoặc lag nặng → rubber-band về vị trí server đang lưu
+            string reason = !validX ? $"X vượt ({deltaX:F2}>{maxDeltaX:F2})"
+                                    : $"Y vượt ({deltaY:F2}>{TOLERANCE:F2}, expectedY={expectedY:F2})";
+            _logger.LogWarning($"[Room {RoomId}] Player {sessionId} bị rubber-band: {reason}");
+ 
             _ = BroadcastOnlyInWorldAsync(new S_TeleportPacket
             {
-                SessionId = sessionId,
+                SessionId      = sessionId,
                 TargetPosition = state.Position
             });
         }

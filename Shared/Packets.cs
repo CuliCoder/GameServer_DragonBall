@@ -45,11 +45,8 @@ public class C_InputPacket : BasePacket
     public bool Fly { get; set; }
     public bool Attack { get; set; }
     public int Tick { get; set; }
-    public float CurrentPositionX { get; set; }
-    public float CurrentPositionY { get; set; }
-    public float TargetPositionX { get; set; }
-    public float TargetPositionY { get; set; }
     public float DeltaTime { get; set; }
+    public PlayerState? PlayerState { get; set; }
 }
 
 
@@ -93,15 +90,15 @@ public struct PlayerInfo
     public int PlayerId { get; set; }
     public string PlayerName { get; set; }
 }
-public class PlayerState
+public struct PlayerState
 {
     public int PlayerId { get; set; }
-    public string PlayerName { get; set; } = "";
+    public string PlayerName { get; set; } 
     public float X { get; set; }
     public float Y { get; set; }
     public float VelX { get; set; }
     public float VelY { get; set; }
-    public string AnimState { get; set; } = "";
+    public string AnimState { get; set; }
     public Vector2 Position { get; set; }
 }
 
