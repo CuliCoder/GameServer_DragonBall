@@ -101,7 +101,8 @@ public class S_BossStatePacket : BasePacket
     public float BossY { get; set; }
     public int HpCurrent { get; set; }
     public int HpMax { get; set; }
-    public string AnimState { get; set; } = "idle"; // idle, run, attack, die, etc.
+    public float speed { get; set; }
+    public EnemyActionState AnimState { get; set; } // idle, run, attack, die, etc.
 }
 
 public class S_BossDefeatPacket : BasePacket
@@ -127,6 +128,11 @@ public struct PlayerInfo
 public class PlayerState
 {
     public int PlayerId { get; set; }
+    public int HpMax { get; set; }
+    public int HpCurrent { get; set; }
+    public int KiMax { get; set; }
+    public int KiCurrent { get; set; }
+    public int SdMax { get; set; }
     public string PlayerName { get; set; } = "";
     public float X { get; set; }
     public float Y { get; set; }
@@ -141,15 +147,15 @@ public class Boss
     public BossType Type { get; set; }
     public Vector2 Position { get; set; }
     public Vector2 Velocity { get; set; }
-    
+
     public int HpMax { get; set; }
     public int HpCurrent { get; set; }
     public bool IsDead { get; set; }
-    
+
     public int Level { get; set; }
     public float Speed { get; set; }
     public string AnimState { get; set; } = "idle"; // idle, run, attack, die, etc.
-    
+
     public int LastDamagePlayerId { get; set; }
     public DateTime SpawnTime { get; set; }
     public int TotalDamageReceived { get; set; }

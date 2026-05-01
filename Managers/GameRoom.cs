@@ -39,21 +39,11 @@ public class GameRoom
 
     // Tick counter để điều tiết broadcast
     private int _serverTick = 0;
-    public Dictionary<int, Boss> bosses { get; private set; } = new Dictionary<int, Boss>
+    public Dictionary<int, EnemyController> bosses { get; private set; } = new Dictionary<int, EnemyController>
     {
-        [1] = new Boss
-        {
-            BossId = 1,
-            Type = BossType.Broly,
-            Position = new Vector2(0, 0),
-            HpMax = 20000000,
-            HpCurrent = 20000000,
-            Level = 1,
-            Speed = 3f,
-            SpawnTime = DateTime.Now
-        }
+        [1] = new EnemyController(1, BossType.Broly, new Vector2(0, 0), 20000000, 1, 3f)
     };
-    public GameRoom(string roomId, int maxPlayer, ILogger logger, Dictionary<int, Boss>? bosses = null)
+    public GameRoom(string roomId, int maxPlayer, ILogger logger, Dictionary<int, EnemyController>? bosses = null)
     {
         RoomId = roomId;
         MaxPlayer = maxPlayer;
@@ -201,7 +191,7 @@ public class GameRoom
             {
                 foreach (var boss in bosses.Values)
                 {
-                    BossHandler.UpdateBossAI(boss, this);
+                    boss.UpdateBossAI(this);
                 }
             }
             // -------------------------------------------------------
@@ -233,7 +223,12 @@ public class GameRoom
     // ============================================================
     private void HandleAttackBoss(int sessionId, C_AttackBossPacket packet)
     {
-        _ = BossHandler.HandleAttackBossAsync(this, sessionId, packet);
+        if (!bosses.TryGetValue(packet.BossId, out EnemyController? boss))
+        {
+            _logger.LogWarning($"[Room {RoomId}] Player {sessionId} tấn công boss không tồn tại: {packet.BossId}");
+            return;
+        }
+        _ = boss.HandleAttackBossAsync(this, packet, sessionId);
     }
     private void HandleInput(int sessionId, C_InputPacket packet)
     {
@@ -394,7 +389,7 @@ public class GameRoom
             }, TaskScheduler.Default);
         }
     }
-    
+
     private void TryBroadcastWorldState(CancellationToken token)
     {
         try
@@ -481,4 +476,7 @@ public class GameRoom
         _sessions.TryGetValue(sessionId, out var s) ? s : null;
     public PlayerState? GetFirstPlayer() =>
         _playerStates.Values.FirstOrDefault();
+    public PlayerState? GetPlayerState(int sessionId) =>
+    _playerStates.TryGetValue(sessionId, out var state) ? state : null;
+    public List<PlayerState> GetAllPlayerStates() => _playerStates.Values.ToList();
 }
